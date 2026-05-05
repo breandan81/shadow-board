@@ -1,0 +1,571 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8"/>
+<meta name="viewport" content="width=device-width,initial-scale=1"/>
+<title>Shadow Board Generator</title>
+<style>
+  *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+  :root {
+    --bg: #1a1a1a; --surface: #242424; --card: #2c2c2c;
+    --border: #3a3a3a; --accent: #4f9eff; --accent2: #3ddc84;
+    --text: #e8e8e8; --muted: #888; --danger: #ff5c5c;
+    --radius: 8px; --font: system-ui, sans-serif;
+  }
+  body { background: var(--bg); color: var(--text); font-family: var(--font);
+         min-height: 100vh; display: flex; flex-direction: column; }
+  header { background: var(--surface); border-bottom: 1px solid var(--border);
+           padding: 14px 24px; display: flex; align-items: center; gap: 12px; }
+  header h1 { font-size: 1.2rem; font-weight: 600; }
+  header span { font-size: 0.8rem; color: var(--muted); }
+  .tabs { display: flex; gap: 4px; padding: 16px 24px 0; border-bottom: 1px solid var(--border); }
+  .tab { padding: 8px 18px; border: 1px solid transparent; border-bottom: none; border-radius: 6px 6px 0 0;
+         cursor: pointer; font-size: 0.9rem; color: var(--muted); background: none; }
+  .tab.active { background: var(--surface); border-color: var(--border); color: var(--text); }
+  .panel { display: none; padding: 24px; max-width: 1200px; width: 100%; margin: 0 auto; flex: 1; }
+  .panel.active { display: flex; flex-direction: column; gap: 20px; }
+
+  /* Cards */
+  .card { background: var(--card); border: 1px solid var(--border); border-radius: var(--radius); padding: 20px; }
+  .card h2 { font-size: 1rem; font-weight: 600; margin-bottom: 14px; display: flex; align-items: center; gap: 8px; }
+  .badge { display: inline-flex; align-items: center; justify-content: center;
+           width: 22px; height: 22px; border-radius: 50%; font-size: 0.75rem; font-weight: 700;
+           background: var(--accent); color: #000; flex-shrink: 0; }
+
+  /* Form elements */
+  label { display: block; font-size: 0.82rem; color: var(--muted); margin-bottom: 4px; }
+  input[type=number], input[type=range], select {
+    background: var(--bg); border: 1px solid var(--border); border-radius: 4px;
+    color: var(--text); padding: 6px 10px; font-size: 0.9rem; width: 100%; }
+  input[type=range] { padding: 4px 0; cursor: pointer; accent-color: var(--accent); }
+  .field { display: flex; flex-direction: column; gap: 4px; }
+  .fields { display: grid; grid-template-columns: repeat(auto-fill, minmax(140px, 1fr)); gap: 12px; }
+  .toggle-row { display: flex; align-items: center; gap: 10px; }
+  .toggle { appearance: none; width: 40px; height: 22px; background: var(--border);
+             border-radius: 11px; cursor: pointer; transition: background .2s; flex-shrink: 0; position: relative; }
+  .toggle:checked { background: var(--accent); }
+  .toggle::after { content: ''; position: absolute; top: 3px; left: 3px;
+                   width: 16px; height: 16px; border-radius: 50%; background: #fff; transition: left .2s; }
+  .toggle:checked::after { left: 21px; }
+
+  /* Buttons */
+  button { cursor: pointer; font-family: var(--font); font-size: 0.9rem;
+           border: none; border-radius: 6px; padding: 9px 18px; font-weight: 500; transition: opacity .15s; }
+  button:hover { opacity: 0.85; }
+  button:disabled { opacity: 0.4; cursor: not-allowed; }
+  .btn-primary { background: var(--accent); color: #000; }
+  .btn-success { background: var(--accent2); color: #000; }
+  .btn-outline { background: none; border: 1px solid var(--border); color: var(--text); }
+  .btn-row { display: flex; gap: 10px; flex-wrap: wrap; align-items: center; }
+
+  /* Upload zone */
+  .upload-zone { border: 2px dashed var(--border); border-radius: var(--radius);
+                 padding: 40px; text-align: center; cursor: pointer; transition: border-color .2s;
+                 position: relative; }
+  .upload-zone:hover, .upload-zone.drag { border-color: var(--accent); }
+  .upload-zone input { position: absolute; inset: 0; opacity: 0; cursor: pointer; width: 100%; }
+  .upload-zone .icon { font-size: 2.5rem; margin-bottom: 8px; }
+  .upload-zone p { color: var(--muted); font-size: 0.9rem; }
+  .upload-zone .filename { color: var(--accent2); font-size: 0.9rem; margin-top: 6px; font-weight: 500; }
+
+  /* Preview grid */
+  .preview-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(280px, 1fr)); gap: 14px; }
+  .preview-card { background: var(--bg); border: 1px solid var(--border); border-radius: var(--radius); overflow: hidden; }
+  .preview-card h3 { padding: 10px 14px; font-size: 0.82rem; font-weight: 600; color: var(--muted);
+                      border-bottom: 1px solid var(--border); }
+  .preview-card img { width: 100%; display: block; object-fit: contain; max-height: 300px;
+                       background: #111; }
+  .preview-card .no-img { height: 200px; display: flex; align-items: center; justify-content: center;
+                           color: var(--muted); font-size: 0.85rem; }
+
+  /* Status */
+  .status { padding: 10px 14px; border-radius: 6px; font-size: 0.88rem; display: flex; gap: 10px; align-items: flex-start; }
+  .status.info   { background: rgba(79,158,255,.12); border: 1px solid rgba(79,158,255,.3); }
+  .status.ok     { background: rgba(61,220,132,.12); border: 1px solid rgba(61,220,132,.3); }
+  .status.error  { background: rgba(255,92,92,.12);  border: 1px solid rgba(255,92,92,.3);  color: var(--danger); }
+  .status.hidden { display: none; }
+
+  /* Spinner */
+  @keyframes spin { to { transform: rotate(360deg); } }
+  .spinner { width: 18px; height: 18px; border: 2px solid var(--border);
+             border-top-color: var(--accent); border-radius: 50%;
+             animation: spin .7s linear infinite; flex-shrink: 0; }
+
+  /* Info table */
+  .info-table { display: grid; grid-template-columns: auto 1fr; gap: 4px 16px; font-size: 0.85rem; }
+  .info-table dt { color: var(--muted); }
+  .info-table dd { font-weight: 500; }
+
+  /* Instructions */
+  ol.steps { list-style: none; display: flex; flex-direction: column; gap: 12px; }
+  ol.steps li { display: flex; gap: 12px; align-items: flex-start; font-size: 0.88rem; line-height: 1.5; }
+  ol.steps li .n { background: var(--border); color: var(--text); min-width: 24px; height: 24px;
+                    border-radius: 50%; display: flex; align-items: center; justify-content: center;
+                    font-size: 0.75rem; font-weight: 700; flex-shrink: 0; margin-top: 1px; }
+
+  /* Datum options */
+  .datum-opts { display: flex; gap: 12px; flex-wrap: wrap; align-items: flex-end; }
+  .datum-opts .field { min-width: 140px; }
+  hr { border: none; border-top: 1px solid var(--border); }
+</style>
+</head>
+<body>
+
+<header>
+  <svg width="28" height="28" viewBox="0 0 28 28" fill="none">
+    <rect x="2" y="2" width="24" height="24" rx="4" fill="#4f9eff" opacity=".15"/>
+    <rect x="6" y="6" width="16" height="16" rx="2" fill="none" stroke="#4f9eff" stroke-width="1.5"/>
+    <path d="M10 14h8M14 10v8" stroke="#4f9eff" stroke-width="1.5" stroke-linecap="round"/>
+  </svg>
+  <h1>Shadow Board Generator</h1>
+  <span>ArUco-guided silhouette → laser-cut SVG</span>
+</header>
+
+<div class="tabs">
+  <button class="tab active" onclick="switchTab('setup')">1 · Setup &amp; Datum Sheet</button>
+  <button class="tab" onclick="switchTab('process')">2 · Process Photo</button>
+</div>
+
+<!-- ── SETUP TAB ─────────────────────────────────────────────────────────── -->
+<div id="tab-setup" class="panel active">
+
+  <div class="card">
+    <h2><span class="badge">1</span> How it works</h2>
+    <ol class="steps">
+      <li><span class="n">A</span>Download and print the datum sheet below at 100% scale (no "fit to page"). Place one or more sheets on the same flat surface as your tools — they don't need to be in any special arrangement, just visible in the photo.</li>
+      <li><span class="n">B</span>Lay your tools flat on the surface. Take a photo roughly from above. The more overhead the shot, the better — but the app corrects for moderate angles.</li>
+      <li><span class="n">C</span>Upload the photo on the Process tab. The app detects the printed ArUco markers, corrects perspective, extracts the tool silhouettes, and produces a scaled SVG ready for your laser cutter.</li>
+    </ol>
+  </div>
+
+  <div class="card">
+    <h2><span class="badge">2</span> Download datum sheet</h2>
+    <p style="font-size:.85rem;color:var(--muted);margin-bottom:14px">
+      The sheet contains ArUco markers at a precisely known size. Print it at 100% scale on any printer.
+      You can cut the sheet into individual markers if you want to scatter them around large tool arrangements.
+    </p>
+    <div class="datum-opts">
+      <div class="field">
+        <label>Paper size</label>
+        <select id="paper">
+          <option value="A4">A4 (210 × 297 mm)</option>
+          <option value="Letter">US Letter (8.5 × 11 in)</option>
+          <option value="A3">A3 (297 × 420 mm)</option>
+        </select>
+      </div>
+      <div class="field">
+        <label>Marker size (mm)</label>
+        <input type="number" id="markerSizeDatum" value="60" min="20" max="150" step="5"/>
+      </div>
+      <button class="btn-primary" onclick="downloadDatum()">Download SVG datum sheet</button>
+    </div>
+    <p style="font-size:.78rem;color:var(--muted);margin-top:12px">
+      ⚠ After printing, verify one marker measures the specified size with a ruler. If your printer
+      scaled it, note the actual printed size and enter it on the Process tab.
+    </p>
+  </div>
+
+  <div class="card">
+    <h2>Tips for best results</h2>
+    <ul style="font-size:.85rem;color:var(--muted);line-height:1.8;padding-left:1.2em">
+      <li>Use a <strong>light, matte, uniform surface</strong> (foam, light wood, paper on table) for dark metal tools.</li>
+      <li>For light-coloured tools, toggle "Light tools on dark background" on the Process tab.</li>
+      <li>Avoid strong shadows or glare — diffuse lighting works best.</li>
+      <li>Keep the camera roughly parallel to the surface (low angle causes heavy distortion).</li>
+      <li>Place at least <strong>one marker</strong> per photo. More markers improve accuracy and robustness.</li>
+      <li>Markers can be on <strong>separate cut pieces</strong> scattered around the tools — they don't need to be on the same sheet or precisely placed.</li>
+    </ul>
+  </div>
+</div>
+
+<!-- ── PROCESS TAB ────────────────────────────────────────────────────────── -->
+<div id="tab-process" class="panel">
+
+  <!-- Upload -->
+  <div class="card">
+    <h2><span class="badge">1</span> Upload photos</h2>
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:14px">
+      <div>
+        <label style="margin-bottom:6px;font-size:.82rem;color:var(--muted)">Tool photo <span style="color:var(--text)">(required)</span></label>
+        <div class="upload-zone" id="dropZone">
+          <input type="file" id="fileInput" accept="image/*" onchange="onFileChange(this)"/>
+          <div class="icon">📷</div>
+          <p>Tools + datum sheet(s)</p>
+          <div class="filename" id="fileName"></div>
+        </div>
+      </div>
+      <div>
+        <label style="margin-bottom:6px;font-size:.82rem;color:var(--muted)">Reference photo <span style="color:var(--muted)">(optional — empty surface, same camera position)</span></label>
+        <div class="upload-zone" id="dropZoneRef">
+          <input type="file" id="refInput" accept="image/*" onchange="onRefChange(this)"/>
+          <div class="icon" style="opacity:.4">🏞</div>
+          <p style="color:var(--muted)">Empty surface before placing tools</p>
+          <div class="filename" id="refName"></div>
+        </div>
+      </div>
+    </div>
+    <p id="refModeNote" style="display:none;margin-top:10px;font-size:.82rem;
+       padding:8px 12px;background:rgba(61,220,132,.1);border:1px solid rgba(61,220,132,.25);
+       border-radius:5px;color:#3ddc84">
+      Reference mode active. Threshold = minimum pixel difference to count as tool (lower = more sensitive).
+      <strong style="color:#ffb84d">Limitation:</strong> specular reflections that shift between the two shots
+      produce false positives just like the simple threshold would. The only reliable fix is a
+      <strong>matte surface</strong> (foam, paper, fabric) or diffuse lighting (overcast, north window, bounce flash).
+    </p>
+  </div>
+
+  <!-- Settings -->
+  <div class="card">
+    <h2><span class="badge">2</span> Settings</h2>
+    <div class="fields">
+      <div class="field">
+        <label>Marker size (mm) <span style="color:var(--muted);font-size:.75rem">printed, measured</span></label>
+        <input type="number" id="markerSizePx" value="60" min="10" max="300" step="1"/>
+      </div>
+      <div class="field">
+        <label>Output resolution (px/mm)</label>
+        <input type="number" id="outputPxPerMm" value="10" min="2" max="40" step="1"/>
+      </div>
+      <div class="field">
+        <label>Fill interior (mm) <span style="color:var(--muted);font-size:.75rem">close kernel</span></label>
+        <input type="number" id="fillInteriorMm" value="3" min="0" max="30" step="1"/>
+      </div>
+      <div class="field">
+        <label>Simplification (mm)</label>
+        <input type="number" id="epsilonMm" value="0.5" min="0.1" max="5" step="0.1"/>
+      </div>
+      <div class="field">
+        <label>Margin / kerf (mm)</label>
+        <input type="number" id="marginMm" value="1" min="0" max="10" step="0.5"/>
+      </div>
+    </div>
+    <hr style="margin:14px 0"/>
+    <div style="display:flex;gap:20px;flex-wrap:wrap;align-items:center">
+      <div>
+        <label style="margin-bottom:6px" id="threshLabel">Threshold: <strong id="threshVal">128</strong></label>
+        <input type="range" id="threshold" min="1" max="254" value="128" style="width:220px"
+               oninput="onThresholdChange(this.value)"/>
+      </div>
+      <div class="toggle-row" id="darkOnLightRow">
+        <input type="checkbox" class="toggle" id="darkOnLight" checked onchange="onThresholdChange()"/>
+        <label for="darkOnLight" style="margin:0;color:var(--text)">Dark tools on light background</label>
+      </div>
+    </div>
+    <hr style="margin:14px 0"/>
+    <div style="display:flex;gap:20px;flex-wrap:wrap;align-items:center">
+      <div>
+        <label style="margin-bottom:6px">Color weight: <strong id="colorWeightVal">0</strong>
+          <span style="color:var(--muted);font-size:.75rem;margin-left:4px">adds saturation signal — helps when tools have color</span>
+        </label>
+        <input type="range" id="colorWeight" min="0" max="3" value="0" step="0.1" style="width:220px"
+               oninput="document.getElementById('colorWeightVal').textContent=this.value; onThresholdChange()"/>
+      </div>
+      <div style="display:flex;flex-direction:column;gap:8px">
+        <div class="toggle-row">
+          <input type="checkbox" class="toggle" id="edgeGuided" onchange="onEdgeGuidedChange()"/>
+          <label for="edgeGuided" style="margin:0;color:var(--text)">Edge guidance
+            <span style="color:var(--muted);font-size:.75rem;margin-left:4px">removes blobs without sharp edges (shadows)</span>
+          </label>
+        </div>
+        <div id="edgeMinRow" style="display:none">
+          <label style="margin-bottom:4px;font-size:.82rem">Min edge gradient: <strong id="edgeMinVal">20</strong>
+            <span style="color:var(--muted);font-size:.75rem">raise to peel more shadow; lower to keep faint tool edges</span>
+          </label>
+          <input type="range" id="edgeMin" min="5" max="80" value="20" style="width:220px"
+                 oninput="document.getElementById('edgeMinVal').textContent=this.value; onThresholdChange()"/>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Actions -->
+  <div class="btn-row">
+    <button class="btn-primary" id="btnAnalyze" onclick="analyzePhoto()" disabled>Analyze photo</button>
+    <button class="btn-outline" id="btnRethresh" onclick="rethreshold()" disabled>Update mask</button>
+    <button class="btn-success" id="btnSvg" onclick="downloadSvg()" disabled>Download SVG</button>
+  </div>
+
+  <!-- Status -->
+  <div class="status info" id="status">
+    <span>Upload a photo and click "Analyze photo" to begin.</span>
+  </div>
+
+  <!-- Preview -->
+  <div class="preview-grid" id="previews">
+    <div class="preview-card" id="cardDetect">
+      <h3>Marker detection</h3>
+      <div class="no-img">No image yet</div>
+    </div>
+    <div class="preview-card" id="cardWarped">
+      <h3>Perspective-corrected</h3>
+      <div class="no-img">No image yet</div>
+    </div>
+    <div class="preview-card" id="cardDiff" style="display:none">
+      <h3>Difference (heat map)</h3>
+      <div class="no-img">No image yet</div>
+    </div>
+    <div class="preview-card" id="cardMask">
+      <h3>Silhouette mask</h3>
+      <div class="no-img">No image yet</div>
+    </div>
+  </div>
+
+  <!-- Info -->
+  <div class="card" id="infoCard" style="display:none">
+    <h2>Detection info</h2>
+    <dl class="info-table" id="infoTable"></dl>
+  </div>
+
+</div><!-- /panel -->
+
+<script>
+// ── Tab switching ────────────────────────────────────────────────────────
+
+function switchTab(name) {
+  document.querySelectorAll('.tab').forEach((t,i) => t.classList.toggle('active', ['setup','process'][i] === name));
+  document.querySelectorAll('.panel').forEach(p => p.classList.remove('active'));
+  document.getElementById('tab-' + name).classList.add('active');
+}
+
+// ── Datum download ────────────────────────────────────────────────────────
+
+function downloadDatum() {
+  const paper = document.getElementById('paper').value;
+  const size  = document.getElementById('markerSizeDatum').value;
+  window.location.href = `/datum.svg?paper=${paper}&marker_size_mm=${size}`;
+}
+
+// ── File handling ─────────────────────────────────────────────────────────
+
+let selectedFile = null;
+let selectedRef  = null;
+let sessionToken = null;
+let threshTimer  = null;
+let isRefMode    = false;
+
+function onFileChange(input) {
+  if (!input.files.length) return;
+  selectedFile = input.files[0];
+  document.getElementById('fileName').textContent = selectedFile.name;
+  document.getElementById('btnAnalyze').disabled = false;
+  sessionToken = null;
+  document.getElementById('btnRethresh').disabled = true;
+  document.getElementById('btnSvg').disabled = true;
+  setStatus('info', 'Photo loaded. Click "Analyze photo" to detect markers.');
+}
+
+function onRefChange(input) {
+  if (!input.files.length) { selectedRef = null; return; }
+  selectedRef = input.files[0];
+  document.getElementById('refName').textContent = selectedRef.name;
+  // Switch threshold to a sensible default for reference mode
+  const thr = document.getElementById('threshold');
+  thr.value = 25;
+  document.getElementById('threshVal').textContent = 25;
+  updateRefModeUI(true);
+  setStatus('info', 'Reference photo loaded. Click "Analyze photo" to process.');
+}
+
+function updateRefModeUI(active) {
+  document.getElementById('refModeNote').style.display   = active ? '' : 'none';
+  document.getElementById('darkOnLightRow').style.display = active ? 'none' : '';
+  document.getElementById('threshLabel').innerHTML =
+    active
+      ? 'Sensitivity (difference): <strong id="threshVal">' + document.getElementById('threshold').value + '</strong>'
+      : 'Threshold: <strong id="threshVal">' + document.getElementById('threshold').value + '</strong>';
+  document.getElementById('cardDiff').style.display = active ? '' : 'none';
+}
+
+// Drag-and-drop (tool photo)
+const dz = document.getElementById('dropZone');
+dz.addEventListener('dragover', e => { e.preventDefault(); dz.classList.add('drag'); });
+dz.addEventListener('dragleave', () => dz.classList.remove('drag'));
+dz.addEventListener('drop', e => {
+  e.preventDefault(); dz.classList.remove('drag');
+  const f = e.dataTransfer.files[0];
+  if (!f) return;
+  selectedFile = f;
+  document.getElementById('fileName').textContent = f.name;
+  document.getElementById('btnAnalyze').disabled = false;
+  sessionToken = null;
+  setStatus('info', 'Photo loaded. Click "Analyze photo" to detect markers.');
+});
+
+// Drag-and-drop (reference photo)
+const dzRef = document.getElementById('dropZoneRef');
+dzRef.addEventListener('dragover', e => { e.preventDefault(); dzRef.classList.add('drag'); });
+dzRef.addEventListener('dragleave', () => dzRef.classList.remove('drag'));
+dzRef.addEventListener('drop', e => {
+  e.preventDefault(); dzRef.classList.remove('drag');
+  const f = e.dataTransfer.files[0];
+  if (!f) return;
+  selectedRef = f;
+  document.getElementById('refName').textContent = f.name;
+  document.getElementById('threshold').value = 25;
+  document.getElementById('threshVal').textContent = 25;
+  updateRefModeUI(true);
+  setStatus('info', 'Reference photo loaded. Click "Analyze photo" to process.');
+});
+
+// ── Status helper ─────────────────────────────────────────────────────────
+
+function setStatus(type, msg, spinner) {
+  const el = document.getElementById('status');
+  el.className = 'status ' + type;
+  el.innerHTML = (spinner ? '<div class="spinner"></div>' : '') + `<span>${msg}</span>`;
+}
+
+// ── Preview helpers ───────────────────────────────────────────────────────
+
+function setPreviewImg(cardId, b64) {
+  const card = document.getElementById(cardId);
+  if (!card) return;
+  let img = card.querySelector('img');
+  if (!img) {
+    card.querySelector('.no-img').style.display = 'none';
+    img = document.createElement('img');
+    card.appendChild(img);
+  }
+  img.src = 'data:image/jpeg;base64,' + b64;
+}
+
+// ── Analyze ───────────────────────────────────────────────────────────────
+
+async function analyzePhoto() {
+  if (!selectedFile) return;
+  const usingRef = !!selectedRef;
+  setStatus('info', usingRef ? 'Processing with reference subtraction…' : 'Detecting markers and warping image…', true);
+  document.getElementById('btnAnalyze').disabled = true;
+
+  const fd = buildFormData();
+  fd.append('file', selectedFile);
+  if (selectedRef) fd.append('ref_file', selectedRef);
+
+  let data;
+  try {
+    const res = await fetch('/analyze', { method: 'POST', body: fd });
+    data = await res.json();
+  } catch(e) {
+    setStatus('error', 'Network error: ' + e.message);
+    document.getElementById('btnAnalyze').disabled = false;
+    return;
+  }
+  document.getElementById('btnAnalyze').disabled = false;
+
+  if (!data.success) {
+    setStatus('error', data.error || 'Analysis failed');
+    return;
+  }
+
+  sessionToken = data.session;
+  isRefMode = data.ref_mode;
+  updateRefModeUI(isRefMode);
+
+  const modeNote = isRefMode ? ' (reference subtraction)' : '';
+  setStatus('ok', `Found ${data.markers_found} marker(s) — IDs: ${data.marker_ids.join(', ')}${modeNote}. Adjust threshold then download SVG.`);
+
+  setPreviewImg('cardDetect', data.detection_img);
+  setPreviewImg('cardWarped', data.warped_img);
+  if (data.diff_img) setPreviewImg('cardDiff', data.diff_img);
+  setPreviewImg('cardMask', data.mask_img);
+
+  showInfo(data);
+  document.getElementById('btnRethresh').disabled = false;
+  document.getElementById('btnSvg').disabled = false;
+}
+
+function showInfo(data) {
+  const card = document.getElementById('infoCard');
+  const tbl  = document.getElementById('infoTable');
+  card.style.display = 'block';
+  tbl.innerHTML = `
+    <dt>Markers detected</dt><dd>${data.markers_found}</dd>
+    <dt>Marker IDs</dt><dd>${data.marker_ids.join(', ')}</dd>
+    <dt>Corrected width</dt><dd>${data.width_mm} mm</dd>
+    <dt>Corrected height</dt><dd>${data.height_mm} mm</dd>
+    <dt>Resolution</dt><dd>${data.px_per_mm} px/mm</dd>
+  `;
+}
+
+// ── Threshold slider ──────────────────────────────────────────────────────
+
+function onThresholdChange(val) {
+  if (val !== undefined) document.getElementById('threshVal').textContent = val;
+  if (!sessionToken) return;
+  clearTimeout(threshTimer);
+  threshTimer = setTimeout(rethreshold, 350);
+}
+
+async function rethreshold() {
+  if (!sessionToken) return;
+  const fd = buildFormData();
+  fd.append('session', sessionToken);
+
+  let data;
+  try {
+    const res = await fetch('/rethreshold', { method: 'POST', body: fd });
+    if (!res.ok) { setStatus('error', 'Rethreshold failed'); return; }
+    data = await res.json();
+  } catch(e) {
+    setStatus('error', 'Network error: ' + e.message);
+    return;
+  }
+
+  if (data.diff_img) setPreviewImg('cardDiff', data.diff_img);
+  setPreviewImg('cardMask', data.mask_img);
+}
+
+// ── SVG download ──────────────────────────────────────────────────────────
+
+async function downloadSvg() {
+  if (!sessionToken) return;
+  setStatus('info', 'Generating SVG…', true);
+  document.getElementById('btnSvg').disabled = true;
+
+  const fd = buildFormData();
+  fd.append('session', sessionToken);
+
+  try {
+    const res = await fetch('/generate-svg', { method: 'POST', body: fd });
+    if (!res.ok) {
+      const t = await res.text();
+      setStatus('error', 'SVG generation failed: ' + t);
+      return;
+    }
+    const blob = await res.blob();
+    const url  = URL.createObjectURL(blob);
+    const a    = document.createElement('a');
+    a.href = url; a.download = 'shadow_board.svg'; a.click();
+    URL.revokeObjectURL(url);
+    setStatus('ok', 'SVG downloaded. Open in Inkscape or your laser cutter software.');
+  } catch(e) {
+    setStatus('error', 'Network error: ' + e.message);
+  }
+  document.getElementById('btnSvg').disabled = false;
+}
+
+// ── Shared form data builder ──────────────────────────────────────────────
+
+function onEdgeGuidedChange() {
+  const on = document.getElementById('edgeGuided').checked;
+  document.getElementById('edgeMinRow').style.display = on ? '' : 'none';
+  onThresholdChange();
+}
+
+function buildFormData() {
+  const fd = new FormData();
+  fd.append('marker_size_mm',   document.getElementById('markerSizePx').value);
+  fd.append('threshold',        document.getElementById('threshold').value);
+  fd.append('dark_on_light',    document.getElementById('darkOnLight').checked);
+  fd.append('output_px_per_mm', document.getElementById('outputPxPerMm').value);
+  fd.append('fill_interior_mm', document.getElementById('fillInteriorMm').value);
+  fd.append('color_weight',     document.getElementById('colorWeight').value);
+  fd.append('edge_guided',      document.getElementById('edgeGuided').checked);
+  fd.append('edge_min',         document.getElementById('edgeMin').value);
+  fd.append('epsilon_mm',       document.getElementById('epsilonMm').value);
+  fd.append('margin_mm',        document.getElementById('marginMm').value);
+  return fd;
+}
+</script>
+</body>
+</html>
