@@ -320,6 +320,101 @@ def extract_silhouette_reference(
     return _outer_contours_only(mask, fill_px, noise_px), diff_vis
 
 
+# ── Depth model silhouette ─────────────────────────────────────────────────
+
+_depth_pipe = None
+_depth_lock = None
+
+
+def _get_depth_pipe():
+    global _depth_pipe, _depth_lock
+    import threading
+    if _depth_lock is None:
+        _depth_lock = threading.Lock()
+    with _depth_lock:
+        if _depth_pipe is None:
+            import torch
+            from transformers import pipeline as hf_pipeline
+            device = 0 if torch.cuda.is_available() else -1
+            _depth_pipe = hf_pipeline(
+                "depth-estimation",
+                model="depth-anything/Depth-Anything-V2-Small-hf",
+                device=device,
+            )
+    return _depth_pipe
+
+
+def extract_silhouette_depth(
+    warped: np.ndarray,
+    ppmm: float,
+    fill_interior_mm: float = 3.0,
+    depth_percentile: float = 95.0,
+) -> tuple[np.ndarray, np.ndarray]:
+    """
+    Extract silhouette using monocular depth estimation (Depth Anything V2 Small).
+    Colour/reflectance-independent — works on any tool colour or finish.
+    First call downloads ~100 MB of model weights.
+
+    depth_percentile: pixels in the top (100 - percentile)% of depth values are
+    treated as objects.  95 = top 5% = closest region.  Lower values are more
+    inclusive; raise if background noise contaminates the mask.
+
+    Returns (mask, depth_vis) where depth_vis is a colourised depth map for preview.
+    """
+    from PIL import Image
+
+    pipe = _get_depth_pipe()
+
+    img_clean = _erase_markers(warped, ppmm, fill=(128, 128, 128))
+    pil = Image.fromarray(cv2.cvtColor(img_clean, cv2.COLOR_BGR2RGB))
+    result = pipe(pil)
+
+    depth = result["predicted_depth"]
+    if hasattr(depth, "numpy"):
+        depth = depth.squeeze().numpy()
+    else:
+        depth = np.array(depth).squeeze()
+
+    depth = cv2.resize(depth.astype(np.float32),
+                       (warped.shape[1], warped.shape[0]),
+                       interpolation=cv2.INTER_LINEAR)
+
+    # Identify gray fill border pixels (warpPerspective fill = 200,200,200)
+    gray_fill = np.all(np.abs(warped.astype(np.int32) - 200) < 8, axis=2)
+
+    # Normalise to 0-255 using valid-area range
+    valid = depth[~gray_fill]
+    d_min, d_max = float(valid.min()), float(valid.max())
+    if d_max <= d_min:
+        blank = np.zeros(warped.shape[:2], dtype=np.uint8)
+        return blank, blank
+
+    depth_norm = ((depth - d_min) / (d_max - d_min) * 255).clip(0, 255).astype(np.uint8)
+    depth_norm[gray_fill] = 0
+
+    # Threshold: pixels in the top (100-percentile)% are closest to camera = on-board objects.
+    # Depth Anything V2 uses disparity convention: larger value = closer.
+    thresh = float(np.percentile(depth_norm[~gray_fill], depth_percentile))
+    _, mask = cv2.threshold(depth_norm, int(thresh), 255, cv2.THRESH_BINARY)
+    mask[gray_fill] = 0
+
+    depth_vis = cv2.applyColorMap(depth_norm, cv2.COLORMAP_INFERNO)
+
+    fill_px  = max(2, int(fill_interior_mm * ppmm))
+    noise_px = max(1, int(1.0 * ppmm))
+    mask = _outer_contours_only(mask, fill_px, noise_px)
+
+    # Smooth the boundary: Gaussian blur-and-rethreshold removes sub-mm pixel
+    # zigzags that RDP simplification can't eliminate.  ~1 mm sigma is enough to
+    # clean depth-model noise without rounding real features.
+    sigma = max(1.0, ppmm * 1.0)
+    ksize = max(3, int(sigma * 4) | 1)
+    mask_f = cv2.GaussianBlur(mask.astype(np.float32), (ksize, ksize), sigma)
+    _, mask = cv2.threshold(mask_f, 127, 255, cv2.THRESH_BINARY)
+
+    return mask.astype(np.uint8), depth_vis
+
+
 # ── SVG generation ─────────────────────────────────────────────────────────
 
 def _contours_to_path_d(contours, px_per_mm: float, epsilon_px: float) -> str:

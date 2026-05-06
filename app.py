@@ -17,6 +17,7 @@ from processing import (
     compute_homography,
     detect_markers,
     extract_silhouette,
+    extract_silhouette_depth,
     extract_silhouette_reference,
     generate_svg,
     warp_image,
@@ -34,6 +35,11 @@ app.mount("/static", StaticFiles(directory=str(STATIC)), name="static")
 
 def _encode_jpg(img: np.ndarray, quality: int = 82) -> str:
     _, buf = cv2.imencode(".jpg", img, [cv2.IMWRITE_JPEG_QUALITY, quality])
+    return base64.b64encode(buf).decode()
+
+
+def _encode_png(img: np.ndarray) -> str:
+    _, buf = cv2.imencode(".png", img)
     return base64.b64encode(buf).decode()
 
 
@@ -101,6 +107,8 @@ async def analyze(
     color_weight: float = Form(0.0),
     edge_guided: bool = Form(False),
     edge_min: int = Form(20),
+    depth_mode: bool = Form(False),
+    depth_percentile: float = Form(95.0),
 ):
     raw = await file.read()
     img = _load_img(raw)
@@ -130,13 +138,15 @@ async def analyze(
     ref_mode = False
     diff_img_b64 = None
 
-    if ref_file is not None:
+    if depth_mode:
+        mask, depth_vis = extract_silhouette_depth(warped, actual_ppmm, fill_interior_mm, depth_percentile)
+        diff_img_b64 = _encode_jpg(_scale_for_preview(depth_vis))
+    elif ref_file is not None:
         ref_raw = await ref_file.read()
         ref_img = _load_img(ref_raw)
         ref_markers = detect_markers(ref_img)
 
         if not ref_markers:
-            # Fall back to using the tool photo's H — camera must not have moved
             H_ref = H
         else:
             H_ref, _ = compute_homography(ref_markers, marker_size_mm)
@@ -160,6 +170,7 @@ async def analyze(
         "success": True,
         "session": token,
         "ref_mode": ref_mode,
+        "depth_mode": depth_mode,
         "markers_found": len(markers),
         "marker_ids": [m["id"] for m in markers],
         "width_mm":  round(warped.shape[1] / actual_ppmm, 1),
@@ -168,7 +179,7 @@ async def analyze(
         "detection_img": _encode_jpg(_scale_for_preview(_draw_overlay(img, markers))),
         "warped_img":    _encode_jpg(_scale_for_preview(warped)),
         "diff_img":      diff_img_b64,
-        "mask_img":      _encode_jpg(_scale_for_preview(mask_bgr)),
+        "mask_img":      _encode_png(_scale_for_preview(mask_bgr)),
     })
 
 
@@ -185,6 +196,8 @@ async def rethreshold(
     color_weight: float = Form(0.0),
     edge_guided: bool = Form(False),
     edge_min: int = Form(20),
+    depth_mode: bool = Form(False),
+    depth_percentile: float = Form(95.0),
 ):
     path = TMPDIR / f"{session}.jpg"
     if not path.exists():
@@ -200,7 +213,10 @@ async def rethreshold(
 
     ref_path = TMPDIR / f"{session}_ref.jpg"
     diff_img_b64 = None
-    if ref_path.exists():
+    if depth_mode:
+        mask, depth_vis = extract_silhouette_depth(warped, actual_ppmm, fill_interior_mm, depth_percentile)
+        diff_img_b64 = _encode_jpg(_scale_for_preview(depth_vis))
+    elif ref_path.exists():
         ref_img = _load_img(ref_path.read_bytes())
         ref_markers = detect_markers(ref_img)
         H_ref = compute_homography(ref_markers, marker_size_mm)[0] if ref_markers else H
@@ -237,6 +253,9 @@ async def gen_svg(
     edge_min: int = Form(20),
     epsilon_mm: float = Form(0.5),
     margin_mm: float = Form(1.0),
+    depth_mode: bool = Form(False),
+    depth_percentile: float = Form(95.0),
+    mask_override: Optional[str] = Form(None),
 ):
     path = TMPDIR / f"{session}.jpg"
     if not path.exists():
@@ -253,18 +272,30 @@ async def gen_svg(
     H, mm_per_px = compute_homography(markers, marker_size_mm)
     warped, actual_ppmm, bounds = warp_image(img, H, mm_per_px, output_px_per_mm)
 
-    ref_path = TMPDIR / f"{session}_ref.jpg"
-    if ref_path.exists():
-        ref_img = _load_img(ref_path.read_bytes())
-        ref_markers = detect_markers(ref_img)
-        H_ref = compute_homography(ref_markers, marker_size_mm)[0] if ref_markers else H
-        warped_ref = warp_to_bounds(ref_img, H_ref, bounds, actual_ppmm)
-        mask, _ = extract_silhouette_reference(
-            warped, warped_ref, threshold, actual_ppmm, fill_interior_mm,
-            edge_guided, edge_min)
+    if mask_override:
+        import base64 as _b64
+        data_url = mask_override.split(",", 1)[-1]
+        png_bytes = _b64.b64decode(data_url)
+        png_arr   = np.frombuffer(png_bytes, np.uint8)
+        mask_img  = cv2.imdecode(png_arr, cv2.IMREAD_GRAYSCALE)
+        mask = cv2.resize(mask_img, (warped.shape[1], warped.shape[0]),
+                          interpolation=cv2.INTER_NEAREST)
+        _, mask = cv2.threshold(mask, 128, 255, cv2.THRESH_BINARY)
     else:
-        mask = extract_silhouette(warped, threshold, dark_on_light, actual_ppmm,
-                                   fill_interior_mm, color_weight, edge_guided, edge_min)
+        ref_path = TMPDIR / f"{session}_ref.jpg"
+        if depth_mode:
+            mask, _ = extract_silhouette_depth(warped, actual_ppmm, fill_interior_mm, depth_percentile)
+        elif ref_path.exists():
+            ref_img = _load_img(ref_path.read_bytes())
+            ref_markers = detect_markers(ref_img)
+            H_ref = compute_homography(ref_markers, marker_size_mm)[0] if ref_markers else H
+            warped_ref = warp_to_bounds(ref_img, H_ref, bounds, actual_ppmm)
+            mask, _ = extract_silhouette_reference(
+                warped, warped_ref, threshold, actual_ppmm, fill_interior_mm,
+                edge_guided, edge_min)
+        else:
+            mask = extract_silhouette(warped, threshold, dark_on_light, actual_ppmm,
+                                      fill_interior_mm, color_weight, edge_guided, edge_min)
 
     svg = generate_svg(mask, actual_ppmm, epsilon_mm, margin_mm)
 

@@ -91,6 +91,16 @@
              border-top-color: var(--accent); border-radius: 50%;
              animation: spin .7s linear infinite; flex-shrink: 0; }
 
+  /* Mask paint toolbar */
+  .mask-toolbar { display: flex; gap: 6px; align-items: center; padding: 6px 14px;
+                  border-bottom: 1px solid var(--border); flex-wrap: wrap; }
+  .mask-btn { background: none; border: 1px solid var(--border); color: var(--muted);
+              padding: 4px 10px; font-size: 0.78rem; border-radius: 4px; cursor: pointer;
+              font-family: var(--font); }
+  .mask-btn:hover { border-color: var(--accent); color: var(--accent); }
+  .mask-btn.active { border-color: var(--accent); color: var(--accent); background: rgba(79,158,255,.1); }
+  .mask-btn:disabled { opacity: 0.35; pointer-events: none; }
+
   /* Info table */
   .info-table { display: grid; grid-template-columns: auto 1fr; gap: 4px 16px; font-size: 0.85rem; }
   .info-table dt { color: var(--muted); }
@@ -276,6 +286,24 @@
         </div>
       </div>
     </div>
+    <hr style="margin:14px 0"/>
+    <div style="display:flex;gap:20px;flex-wrap:wrap;align-items:center">
+      <div style="display:flex;flex-direction:column;gap:8px">
+        <div class="toggle-row">
+          <input type="checkbox" class="toggle" id="depthMode" onchange="onDepthModeChange()"/>
+          <label for="depthMode" style="margin:0;color:var(--text)">Depth model
+            <span style="color:var(--muted);font-size:.75rem;margin-left:4px">colour-independent — works on metallic/silver tools (downloads ~100 MB on first use)</span>
+          </label>
+        </div>
+        <div id="depthPercentileRow" style="display:none">
+          <label style="margin-bottom:4px;font-size:.82rem">Sensitivity: <strong id="depthPctVal">95</strong>th percentile
+            <span style="color:var(--muted);font-size:.75rem"> — lower includes more of the scene; raise to reduce background noise</span>
+          </label>
+          <input type="range" id="depthPercentile" min="80" max="99" value="95" step="1" style="width:220px"
+                 oninput="document.getElementById('depthPctVal').textContent=this.value; onThresholdChange()"/>
+        </div>
+      </div>
+    </div>
   </div>
 
   <!-- Actions -->
@@ -306,7 +334,16 @@
     </div>
     <div class="preview-card" id="cardMask">
       <h3>Silhouette mask</h3>
-      <div class="no-img">No image yet</div>
+      <div id="maskTools" class="mask-toolbar" style="display:none">
+        <button id="btnToolErase" class="mask-btn active" onclick="setTool('erase')">Erase</button>
+        <button id="btnToolDraw"  class="mask-btn"        onclick="setTool('draw')">Draw</button>
+        <input  type="range" id="brushSize" min="3" max="60" value="15" title="Brush size"
+                style="width:70px;accent-color:var(--accent);cursor:pointer"
+                oninput="updateCursor()"/>
+        <button id="btnUndo" class="mask-btn" onclick="undoPaint()" disabled>↩ Undo</button>
+      </div>
+      <div class="no-img" id="maskNoImg">No image yet</div>
+      <canvas id="maskCanvas" style="display:none;width:100%;touch-action:none;background:#111"></canvas>
     </div>
   </div>
 
@@ -429,6 +466,121 @@ function setPreviewImg(cardId, b64) {
   img.src = 'data:image/jpeg;base64,' + b64;
 }
 
+// ── Mask paint tool ───────────────────────────────────────────────────────
+
+const maskCanvas = document.getElementById('maskCanvas');
+const maskCtx    = maskCanvas.getContext('2d');
+let   paintTool  = 'erase';
+let   isDrawing  = false;
+let   lastPt     = null;
+const undoStack  = [];
+const MAX_UNDO   = 20;
+
+function updateCursor() {
+  if (maskCanvas.style.display === 'none') return;
+  const brushPx = parseInt(document.getElementById('brushSize').value);
+  const rect    = maskCanvas.getBoundingClientRect();
+  if (!rect.width) return;
+  const r = Math.max(2, Math.round(brushPx * rect.width / maskCanvas.width));
+  const size = r * 2 + 6;
+  const c = document.createElement('canvas');
+  c.width = c.height = size;
+  const ctx = c.getContext('2d');
+  ctx.strokeStyle = paintTool === 'erase' ? 'rgba(255,80,80,0.9)' : 'rgba(80,200,255,0.9)';
+  ctx.lineWidth = 1.5;
+  ctx.beginPath();
+  ctx.arc(size / 2, size / 2, r - 0.5, 0, Math.PI * 2);
+  ctx.stroke();
+  ctx.fillStyle = 'rgba(255,255,255,0.85)';
+  ctx.beginPath();
+  ctx.arc(size / 2, size / 2, 1.5, 0, Math.PI * 2);
+  ctx.fill();
+  maskCanvas.style.cursor = `url('${c.toDataURL()}') ${size / 2} ${size / 2}, crosshair`;
+}
+
+function setTool(tool) {
+  paintTool = tool;
+  document.getElementById('btnToolErase').classList.toggle('active', tool === 'erase');
+  document.getElementById('btnToolDraw').classList.toggle('active',  tool === 'draw');
+  updateCursor();
+}
+
+function setMaskImage(b64) {
+  const img = new Image();
+  img.onload = () => {
+    maskCanvas.width  = img.naturalWidth;
+    maskCanvas.height = img.naturalHeight;
+    maskCtx.drawImage(img, 0, 0);
+    document.getElementById('maskNoImg').style.display = 'none';
+    document.getElementById('maskTools').style.display = 'flex';
+    maskCanvas.style.display = 'block';
+    undoStack.length = 0;
+    document.getElementById('btnUndo').disabled = true;
+    updateCursor();
+  };
+  img.src = 'data:image/png;base64,' + b64;
+}
+
+function canvasPt(e) {
+  const r  = maskCanvas.getBoundingClientRect();
+  const sx = maskCanvas.width  / r.width;
+  const sy = maskCanvas.height / r.height;
+  const src = e.touches ? e.touches[0] : e;
+  return { x: (src.clientX - r.left) * sx, y: (src.clientY - r.top) * sy };
+}
+
+function paintAt(pt) {
+  const r = parseInt(document.getElementById('brushSize').value);
+  maskCtx.fillStyle = paintTool === 'erase' ? 'black' : 'white';
+  if (lastPt) {
+    const dx = pt.x - lastPt.x, dy = pt.y - lastPt.y;
+    const steps = Math.max(1, Math.floor(Math.hypot(dx, dy) / (r * 0.5)));
+    for (let i = 0; i <= steps; i++) {
+      const t = i / steps;
+      maskCtx.beginPath();
+      maskCtx.arc(lastPt.x + dx*t, lastPt.y + dy*t, r, 0, Math.PI*2);
+      maskCtx.fill();
+    }
+  } else {
+    maskCtx.beginPath();
+    maskCtx.arc(pt.x, pt.y, r, 0, Math.PI*2);
+    maskCtx.fill();
+  }
+  lastPt = pt;
+}
+
+function startStroke(e) {
+  e.preventDefault();
+  undoStack.push(maskCtx.getImageData(0, 0, maskCanvas.width, maskCanvas.height));
+  if (undoStack.length > MAX_UNDO) undoStack.shift();
+  document.getElementById('btnUndo').disabled = false;
+  isDrawing = true;
+  lastPt = null;
+  paintAt(canvasPt(e));
+}
+
+function continueStroke(e) {
+  if (!isDrawing) return;
+  e.preventDefault();
+  paintAt(canvasPt(e));
+}
+
+function endStroke() { isDrawing = false; lastPt = null; }
+
+maskCanvas.addEventListener('mousedown',  startStroke);
+maskCanvas.addEventListener('mousemove',  continueStroke);
+maskCanvas.addEventListener('mouseup',    endStroke);
+maskCanvas.addEventListener('mouseleave', endStroke);
+maskCanvas.addEventListener('touchstart', startStroke,    { passive: false });
+maskCanvas.addEventListener('touchmove',  continueStroke, { passive: false });
+maskCanvas.addEventListener('touchend',   endStroke);
+
+function undoPaint() {
+  if (!undoStack.length) return;
+  maskCtx.putImageData(undoStack.pop(), 0, 0);
+  document.getElementById('btnUndo').disabled = undoStack.length === 0;
+}
+
 // ── Analyze ───────────────────────────────────────────────────────────────
 
 async function analyzePhoto() {
@@ -461,13 +613,17 @@ async function analyzePhoto() {
   isRefMode = data.ref_mode;
   updateRefModeUI(isRefMode);
 
-  const modeNote = isRefMode ? ' (reference subtraction)' : '';
+  const modeNote = data.depth_mode ? ' (depth model)' : isRefMode ? ' (reference subtraction)' : '';
+  if (data.depth_mode || data.diff_img) {
+    document.getElementById('cardDiff').style.display = '';
+    if (data.depth_mode) document.querySelector('#cardDiff h3').textContent = 'Depth map';
+  }
   setStatus('ok', `Found ${data.markers_found} marker(s) — IDs: ${data.marker_ids.join(', ')}${modeNote}. Adjust threshold then download SVG.`);
 
   setPreviewImg('cardDetect', data.detection_img);
   setPreviewImg('cardWarped', data.warped_img);
   if (data.diff_img) setPreviewImg('cardDiff', data.diff_img);
-  setPreviewImg('cardMask', data.mask_img);
+  setMaskImage(data.mask_img);
 
   showInfo(data);
   document.getElementById('btnRethresh').disabled = false;
@@ -512,7 +668,7 @@ async function rethreshold() {
   }
 
   if (data.diff_img) setPreviewImg('cardDiff', data.diff_img);
-  setPreviewImg('cardMask', data.mask_img);
+  setMaskImage(data.mask_img);
 }
 
 // ── SVG download ──────────────────────────────────────────────────────────
@@ -524,6 +680,7 @@ async function downloadSvg() {
 
   const fd = buildFormData();
   fd.append('session', sessionToken);
+  if (maskCanvas.width > 0) fd.append('mask_override', maskCanvas.toDataURL('image/png'));
 
   try {
     const res = await fetch('/generate-svg', { method: 'POST', body: fd });
@@ -552,6 +709,29 @@ function onEdgeGuidedChange() {
   onThresholdChange();
 }
 
+function onDepthModeChange() {
+  const on = document.getElementById('depthMode').checked;
+  // Depth mode is self-contained — threshold, colour controls, and reference photo are unused
+  const threshControls = document.getElementById('threshLabel').closest('div').parentElement;
+  const colorControls  = document.getElementById('colorWeight').closest('div').parentElement;
+  [threshControls, colorControls].forEach(el => { if (el) el.style.opacity = on ? '0.3' : '1'; });
+  document.getElementById('dropZoneRef').style.opacity = on ? '0.3' : '1';
+  document.getElementById('refInput').disabled = on;
+  document.getElementById('depthPercentileRow').style.display = on ? '' : 'none';
+  if (on) {
+    document.getElementById('cardDiff').style.display = '';
+    document.querySelector('#cardDiff h3').textContent = 'Depth map';
+  } else {
+    document.querySelector('#cardDiff h3').textContent = 'Difference (heat map)';
+  }
+}
+
+// Sync toggle-driven UI state on page load (browser may restore checkbox)
+window.addEventListener('DOMContentLoaded', () => {
+  onDepthModeChange();
+  onEdgeGuidedChange();
+});
+
 function buildFormData() {
   const fd = new FormData();
   fd.append('marker_size_mm',   document.getElementById('markerSizePx').value);
@@ -564,6 +744,8 @@ function buildFormData() {
   fd.append('edge_min',         document.getElementById('edgeMin').value);
   fd.append('epsilon_mm',       document.getElementById('epsilonMm').value);
   fd.append('margin_mm',        document.getElementById('marginMm').value);
+  fd.append('depth_mode',        document.getElementById('depthMode').checked);
+  fd.append('depth_percentile',  document.getElementById('depthPercentile').value);
   return fd;
 }
 </script>
