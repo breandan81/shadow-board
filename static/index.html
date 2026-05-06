@@ -489,6 +489,7 @@ let   isDrawing  = false;
 let   lastPt     = null;
 const undoStack  = [];
 const MAX_UNDO   = 20;
+let   maskEdited = false;
 
 function updateCursor() {
   if (maskCanvas.style.display === 'none') return;
@@ -529,6 +530,7 @@ function setMaskImage(b64) {
     document.getElementById('maskTools').style.display = 'flex';
     maskCanvas.style.display = 'block';
     undoStack.length = 0;
+    maskEdited = false;
     document.getElementById('btnUndo').disabled = true;
     updateCursor();
   };
@@ -569,6 +571,7 @@ function startStroke(e) {
   if (undoStack.length > MAX_UNDO) undoStack.shift();
   document.getElementById('btnUndo').disabled = false;
   isDrawing = true;
+  maskEdited = true;
   lastPt = null;
   paintAt(canvasPt(e));
 }
@@ -694,7 +697,7 @@ async function downloadSvg() {
 
   const fd = buildFormData();
   fd.append('session', sessionToken);
-  if (maskCanvas.width > 0) fd.append('mask_override', maskCanvas.toDataURL('image/png'));
+  if (maskEdited) fd.append('mask_override', maskCanvas.toDataURL('image/png'));
 
   try {
     const res = await fetch('/generate-svg', { method: 'POST', body: fd });
