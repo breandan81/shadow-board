@@ -6,8 +6,8 @@ Turn a photo of a tool into a laser-cuttable SVG shadow board outline — automa
 
 ## How it works
 
-1. Print the datum sheet (a page with four ArUco markers at known positions).
-2. Lay it flat on your shadow board surface with the tool on top.
+1. Print the datum sheet (a page of ArUco markers) and cut out as many as you need.
+2. Scatter them flat on your shadow board surface around the tool — no fixed positions required.
 3. Photograph the tool from above.
 4. Upload the photo — the app detects the markers, corrects perspective, extracts the tool silhouette, and generates an SVG you can send straight to a laser cutter.
 
@@ -42,7 +42,7 @@ uvicorn app:app --host 0.0.0.0 --port 8000 --reload
 
 ### Step 1 — Print the datum sheet
 
-Click **Download Datum Sheet** on the Setup tab and print it at 100% scale (no scaling to fit). The sheet contains four ArUco markers arranged at known positions. Print on plain white paper and tape it flat to your shadow board.
+Click **Download Datum Sheet** on the Setup tab and print it at 100% scale (no scaling to fit). The sheet contains six distinct ArUco markers. You can use the whole sheet or cut the markers apart and scatter them — placement does not need to be precise or follow any pattern. Print on plain white paper and lay them flat on your shadow board.
 
 You can adjust the marker size (default 60 mm) if you need a larger or smaller sheet. The same size must be entered in the app when processing photos.
 
@@ -50,7 +50,7 @@ You can adjust the marker size (default 60 mm) if you need a larger or smaller s
 
 Place the tool on the datum sheet and photograph it from directly above. Tips for best results:
 
-- All four markers should be fully visible in the frame.
+- At least one marker must be visible; more markers give better perspective correction. Spread them around the tool for best results.
 - Avoid strong shadows or reflections on the markers.
 - The sheet should be flat — curled edges will distort the homography.
 - Fill the frame with the board as much as possible; more pixels = cleaner outline.
@@ -107,7 +107,7 @@ This processes each photo through the pipeline and compares the SVG bounding box
 
 ## Troubleshooting
 
-**"No ArUco markers detected"** — The markers are not visible or the image is too dark/blurry. Make sure all four corners of the datum sheet are in frame and well-lit.
+**"No ArUco markers detected"** — No markers are visible or the image is too dark/blurry. Make sure at least one marker is in frame, flat, and well-lit.
 
 **Outline includes the board edge or other objects** — Lower the threshold (standard mode) or increase the depth sensitivity (depth mode). Use the mask paint tool to erase false positives.
 
