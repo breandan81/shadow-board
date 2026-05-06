@@ -42,7 +42,7 @@ uvicorn app:app --host 0.0.0.0 --port 8000 --reload
 
 ### Step 1 — Print the datum sheet
 
-Click **Download Datum Sheet** on the Setup tab and print it at 100% scale (no scaling to fit). The sheet contains six distinct ArUco markers. You can use the whole sheet or cut the markers apart and scatter them — placement does not need to be precise or follow any pattern. Print on plain white paper and lay them flat on your shadow board.
+Click **Download Datum Sheet** on the Setup tab and print it at 100% scale (no scaling to fit). The sheet contains six ArUco markers. You can use the whole sheet, cut the markers apart and scatter them, or print multiple sheets — placement does not need to be precise or follow any pattern. Print on plain white paper and lay them flat on your shadow board.
 
 You can adjust the marker size (default 60 mm) if you need a larger or smaller sheet. The same size must be entered in the app when processing photos.
 
