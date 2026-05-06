@@ -248,6 +248,10 @@
         <label>Margin / kerf (mm)</label>
         <input type="number" id="marginMm" value="1" min="0" max="10" step="0.5"/>
       </div>
+      <div class="field">
+        <label>Smooth outline (mm) <span style="color:var(--muted);font-size:.75rem">stays outside tool</span></label>
+        <input type="number" id="smoothMm" value="0" min="0" max="10" step="0.5"/>
+      </div>
     </div>
     <hr style="margin:14px 0"/>
     <div style="display:flex;gap:20px;flex-wrap:wrap;align-items:center">
@@ -310,7 +314,7 @@
   <div class="btn-row">
     <button class="btn-primary" id="btnAnalyze" onclick="analyzePhoto()" disabled>Analyze photo</button>
     <button class="btn-outline" id="btnRethresh" onclick="rethreshold()" disabled>Update mask</button>
-    <button class="btn-success" id="btnSvg" onclick="downloadSvg()" disabled>Download SVG</button>
+    <button class="btn-success" id="btnSvg" onclick="downloadSvg()" disabled>Generate SVG</button>
   </div>
 
   <!-- Status -->
@@ -331,6 +335,16 @@
     <div class="preview-card" id="cardDiff" style="display:none">
       <h3>Difference (heat map)</h3>
       <div class="no-img">No image yet</div>
+    </div>
+    <div class="preview-card" id="cardSvg" style="display:none">
+      <h3>SVG preview</h3>
+      <div style="padding:8px;background:#fff;border-radius:0 0 var(--radius) var(--radius)">
+        <img id="svgPreviewImg" style="width:100%;display:block"/>
+      </div>
+      <div style="padding:8px 14px;border-top:1px solid var(--border)">
+        <a id="svgDownloadLink" href="#" download="shadow_board.svg"
+           style="font-size:.82rem;color:var(--accent2)">Download SVG</a>
+      </div>
     </div>
     <div class="preview-card" id="cardMask">
       <h3>Silhouette mask</h3>
@@ -689,12 +703,21 @@ async function downloadSvg() {
       setStatus('error', 'SVG generation failed: ' + t);
       return;
     }
-    const blob = await res.blob();
-    const url  = URL.createObjectURL(blob);
-    const a    = document.createElement('a');
-    a.href = url; a.download = 'shadow_board.svg'; a.click();
-    URL.revokeObjectURL(url);
-    setStatus('ok', 'SVG downloaded. Open in Inkscape or your laser cutter software.');
+    const svgText = await res.text();
+    const blob    = new Blob([svgText], { type: 'image/svg+xml' });
+    const url     = URL.createObjectURL(blob);
+
+    // Show SVG preview
+    const card = document.getElementById('cardSvg');
+    card.style.display = '';
+    const dataUrl = 'data:image/svg+xml;charset=utf-8,' + encodeURIComponent(svgText);
+    document.getElementById('svgPreviewImg').src = dataUrl;
+    const dl = document.getElementById('svgDownloadLink');
+    if (dl._prevUrl) URL.revokeObjectURL(dl._prevUrl);
+    dl._prevUrl = url;
+    dl.href = url;
+
+    setStatus('ok', 'SVG ready — preview shown below. Click "Download SVG" in the preview card to save.');
   } catch(e) {
     setStatus('error', 'Network error: ' + e.message);
   }
@@ -744,6 +767,7 @@ function buildFormData() {
   fd.append('edge_min',         document.getElementById('edgeMin').value);
   fd.append('epsilon_mm',       document.getElementById('epsilonMm').value);
   fd.append('margin_mm',        document.getElementById('marginMm').value);
+  fd.append('smooth_mm',         document.getElementById('smoothMm').value);
   fd.append('depth_mode',        document.getElementById('depthMode').checked);
   fd.append('depth_percentile',  document.getElementById('depthPercentile').value);
   return fd;

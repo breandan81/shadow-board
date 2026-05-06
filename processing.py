@@ -440,6 +440,7 @@ def generate_svg(
     px_per_mm: float,
     epsilon_mm: float = 0.5,
     margin_mm: float = 0.0,
+    smooth_mm: float = 0.0,
 ) -> str:
     # Dilate by (margin_mm + epsilon_mm) before extracting and simplifying contours.
     # The epsilon_mm buffer ensures that when RDP removes vertices and replaces curved
@@ -449,6 +450,14 @@ def generate_svg(
     total_expand_px = max(1, int((margin_mm + epsilon_mm) * px_per_mm))
     k = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (2*total_expand_px+1, 2*total_expand_px+1))
     mask = cv2.dilate(mask, k)
+
+    # Morphological closing smooths concave corners and jagged edges while
+    # guaranteeing the result always contains the original dilated shape
+    # (closing is extensive: result ⊇ input).
+    if smooth_mm > 0:
+        smooth_px = max(1, int(smooth_mm * px_per_mm))
+        k_s = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (2*smooth_px+1, 2*smooth_px+1))
+        mask = cv2.morphologyEx(mask, cv2.MORPH_CLOSE, k_s)
 
     contours, _ = cv2.findContours(mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_TC89_KCOS)
     if not contours:

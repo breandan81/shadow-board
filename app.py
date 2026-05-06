@@ -253,6 +253,7 @@ async def gen_svg(
     edge_min: int = Form(20),
     epsilon_mm: float = Form(0.5),
     margin_mm: float = Form(1.0),
+    smooth_mm: float = Form(0.0),
     depth_mode: bool = Form(False),
     depth_percentile: float = Form(95.0),
     mask_override: Optional[str] = Form(None),
@@ -297,7 +298,7 @@ async def gen_svg(
             mask = extract_silhouette(warped, threshold, dark_on_light, actual_ppmm,
                                       fill_interior_mm, color_weight, edge_guided, edge_min)
 
-    svg = generate_svg(mask, actual_ppmm, epsilon_mm, margin_mm)
+    svg = generate_svg(mask, actual_ppmm, epsilon_mm, margin_mm, smooth_mm)
 
     return Response(
         content=svg,
